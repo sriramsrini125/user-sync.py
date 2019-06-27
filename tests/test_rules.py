@@ -1,6 +1,7 @@
 import mock
 import pytest
-
+import os
+import csv
 from user_sync.rules import RuleProcessor
 
 
@@ -52,3 +53,34 @@ def test_stray_key_map(csv_reader, rule_processor):
                              'enterpriseID,removeuser3@example.com,': None,
                              'adobeID,removeuser2@example.com,': None}}
     assert expected_value == actual_value
+
+
+def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
+    stream, logger = log_stream
+    rule_processor.logger = logger
+    rule_processor.stray_list_output_path = os.path.join(tmpdir, 'strays_test.csv')
+    rule_processor.stray_key_map = {None: {'federatedID,aa@seaofcarag.com,': set(),
+                                           'federatedID,adobe.user2@seaofcarag.com,': set()
+                                           }}
+    rule_processor.write_stray_key_map()
+
+    stream.flush()
+    actual_logger_output = stream.getvalue()
+
+    output_filename = rule_processor.stray_list_output_path
+    length_of_adobe_only_users = str(len(rule_processor.stray_key_map[None]))
+
+    assert output_filename in actual_logger_output
+    assert length_of_adobe_only_users in actual_logger_output
+
+    tmp_file = tmpdir.join("strays_test.csv")
+
+    with open(tmp_file, 'r') as our_file:
+        reader = csv.reader(our_file)
+        actual_values_of_csv = list(reader)
+
+    assert actual_values_of_csv == [['type', 'username', 'domain'], ['federatedID', 'aa@seaofcarag.com', ''],
+                                    ['federatedID', 'adobe.user2@seaofcarag.com', '']]
+
+    # cleaning the test directory
+    tmpdir.remove()
