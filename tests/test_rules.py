@@ -59,8 +59,8 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
     stream, logger = log_stream
     rule_processor.logger = logger
     rule_processor.stray_list_output_path = os.path.join(tmpdir, 'strays_test.csv')
-    rule_processor.stray_key_map = {None: {'federatedID,aa@seaofcarag.com,': set(),
-                                           'federatedID,adobe.user2@seaofcarag.com,': set()
+    rule_processor.stray_key_map = {None: {'enterpriseID,adobe.user1@example.com,': set(),
+                                           'federatedID,adobe.user2@example.com,': set()
                                            }}
     rule_processor.write_stray_key_map()
 
@@ -79,8 +79,8 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
         reader = csv.reader(our_file)
         actual_values_of_csv = list(reader)
 
-    assert actual_values_of_csv == [['type', 'username', 'domain'], ['federatedID', 'aa@seaofcarag.com', ''],
-                                    ['federatedID', 'adobe.user2@seaofcarag.com', '']]
+    assert actual_values_of_csv == [['type', 'username', 'domain'], ['enterpriseID', 'adobe.user1@example.com', ''],
+                                    ['federatedID', 'adobe.user2@example.com', '']]
 
     # cleaning the test directory
     tmpdir.remove()
