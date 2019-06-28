@@ -23,7 +23,7 @@ def caller_options():
             'adobe_users': ['all'], 'config_filename': 'tests/fixture/user-sync-config.yml',
             'connector': 'ldap', 'encoding_name': 'utf8', 'user_filter': None,
             'users': None, 'directory_connector_type': 'csv',
-            'directory_connector_overridden_options': {'file_path': '../tests/fixture/remove-data.csv'},
+            'directory_connector_overridden_options': {'file_path': None},
             'adobe_group_mapped': False, 'additional_groups': []}
 
 
@@ -42,13 +42,13 @@ def test_stray_key_map(csv_reader, rule_processor):
     assert expected_value == actual_value
 
     # Added secondary umapi value
-    csv_mock_data = [{'type': 'adobeID', 'username': 'remo@sample.com', 'domain': 'sample.com', 'umapi': 'secondary'},
+    csv_mock_data = [{'type': 'adobeID', 'username': 'remo@example.com', 'domain': 'sample.com', 'umapi': 'secondary'},
                      {'type': 'federatedID', 'username': 'removeuser@example.com'},
                      {'type': 'enterpriseID', 'username': 'removeuser3@example.com', 'domain': 'example.com'}]
     csv_reader.return_value = csv_mock_data
     rule_processor.read_stray_key_map('')
     actual_value = rule_processor.stray_key_map
-    expected_value = {'secondary': {'adobeID,remo@sample.com,': None},
+    expected_value = {'secondary': {'adobeID,remo@example.com,': None},
                       None: {'federatedID,removeuser@example.com,': None,
                              'enterpriseID,removeuser3@example.com,': None,
                              'adobeID,removeuser2@example.com,': None}}
@@ -56,10 +56,13 @@ def test_stray_key_map(csv_reader, rule_processor):
 
 
 def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
+    tmp_file = str(tmpdir.join('strays_test.csv'))
     stream, logger = log_stream
     rule_processor.logger = logger
-    rule_processor.stray_list_output_path = os.path.join(tmpdir, 'strays_test.csv')
-    rule_processor.stray_key_map = {None: {'enterpriseID,adobe.user1@example.com,': set(),
+
+    rule_processor.stray_list_output_path = tmp_file
+    rule_processor.stray_key_map = {'secondary': {'adobeID,remoab@example.com,': set()},
+                                    None: {'enterpriseID,adobe.user1@example.com,': set(),
                                            'federatedID,adobe.user2@example.com,': set()
                                            }}
     rule_processor.write_stray_key_map()
@@ -73,14 +76,10 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
     assert output_filename in actual_logger_output
     assert length_of_adobe_only_users in actual_logger_output
 
-    tmp_file = tmpdir.join("strays_test.csv")
-
     with open(tmp_file, 'r') as our_file:
         reader = csv.reader(our_file)
         actual_values_of_csv = list(reader)
-
-    assert actual_values_of_csv == [['type', 'username', 'domain'], ['enterpriseID', 'adobe.user1@example.com', ''],
-                                    ['federatedID', 'adobe.user2@example.com', '']]
-
-    # cleaning the test directory
-    tmpdir.remove()
+        assert actual_values_of_csv == [['type', 'username', 'domain', 'umapi'],
+                                        ['federatedID', 'adobe.user2@example.com', '', ''],
+                                        ['enterpriseID', 'adobe.user1@example.com', '', ''],
+                                        ['adobeID', 'remoab@example.com', '', 'secondary']]
