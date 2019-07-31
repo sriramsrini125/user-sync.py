@@ -3,6 +3,7 @@ import pytest
 import os
 import csv
 from user_sync.rules import RuleProcessor
+import collections
 
 
 @pytest.fixture
@@ -42,7 +43,7 @@ def test_stray_key_map(csv_reader, rule_processor):
     assert expected_value == actual_value
 
     # Added secondary umapi value
-    csv_mock_data = [{'type': 'adobeID', 'username': 'remo@example.com', 'domain': 'sample.com', 'umapi': 'secondary'},
+    csv_mock_data = [{'type': 'adobeID', 'username': 'remo@example.com', 'domain': 'example.com', 'umapi': 'secondary'},
                      {'type': 'federatedID', 'username': 'removeuser@example.com'},
                      {'type': 'enterpriseID', 'username': 'removeuser3@example.com', 'domain': 'example.com'}]
     csv_reader.return_value = csv_mock_data
@@ -61,10 +62,11 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
     rule_processor.logger = logger
 
     rule_processor.stray_list_output_path = tmp_file
-    rule_processor.stray_key_map = {'secondary': {'adobeID,remoab@example.com,': set()},
-                                    None: {'enterpriseID,adobe.user1@example.com,': set(),
-                                           'federatedID,adobe.user2@example.com,': set()
-                                           }}
+    rule_processor.stray_key_map = {
+        'secondary': {'adobeID,remoab@example.com,': set(), 'enterpriseID,adobe.user3@example.com,': set(), },
+        None: {'enterpriseID,adobe.user1@example.com,': set(),
+               'federatedID,adobe.user2@example.com,': set()
+               }}
     rule_processor.write_stray_key_map()
 
     stream.flush()
@@ -78,8 +80,15 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
 
     with open(tmp_file, 'r') as our_file:
         reader = csv.reader(our_file)
-        actual_values_of_csv = list(reader)
-        assert actual_values_of_csv == [['type', 'username', 'domain', 'umapi'],
-                                        ['federatedID', 'adobe.user2@example.com', '', ''],
-                                        ['enterpriseID', 'adobe.user1@example.com', '', ''],
-                                        ['adobeID', 'remoab@example.com', '', 'secondary']]
+        actual = list(reader)
+        expected = [['type', 'username', 'domain', 'umapi'],
+                    ['enterpriseID', 'adobe.user1@example.com', '', ''],
+                    ['federatedID', 'adobe.user2@example.com', '', ''],
+                    ['adobeID', 'remoab@example.com', '', 'secondary'],
+                    ['enterpriseID', 'adobe.user3@example.com', '', 'secondary']]
+        actual_str = [','.join(r) for r in actual]
+        expected_str = [','.join(r) for r in expected]
+        for row in actual_str[1:3]:
+            assert row in expected_str[1:3]
+        for row in actual_str[3:5]:
+            assert row in expected_str[3:5]
