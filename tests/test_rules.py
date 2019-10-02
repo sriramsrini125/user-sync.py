@@ -315,6 +315,10 @@ def test_is_selected_user_key(rule_processor):
     result = rule_processor.is_selected_user_key('federatedID,nuver.yusser@example.com,')
     assert result
 
+@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
+def test_sync_umapi_users(get_users,rule_processor):
+    primary_adds = {'federatedID,nameless@example.com,': {'example group'},
+                    'federatedID,glaforge@example.com,': {'example group'}}
 
 def test_is_umapi_user_excluded(rule_processor):
     in_primary_org = True
