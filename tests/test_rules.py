@@ -3,9 +3,9 @@ from copy import deepcopy
 
 import mock
 import pytest
+import six
 import yaml
 from mock import MagicMock
-import six
 
 from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo
 
@@ -751,7 +751,8 @@ def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data
 
     umapi_connectors = mock.MagicMock()
     secondary_connector = mock.MagicMock()
-    umapi_connectors.get_secondary_connectors.return_value = {"troy": secondary_connector}
+    umapi_connectors.get_secondary_connectors.return_value = {
+        "troy": secondary_connector}
     umapi_info = UmapiTargetInfo("troy")
     umapi_info.add_mapped_group("kellog")
     rule_processor.umapi_info_by_name["troy"] = umapi_info
@@ -766,7 +767,7 @@ def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data
     assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
     assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
 
-    results = [c.args[0:2] for c in rule_processor.create_umapi_user.mock_calls]
+    results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
     actual = [(k, v) for k, v in six.iteritems(refined_users)]
     assert compare_iterable(results, actual)
 
