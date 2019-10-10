@@ -315,10 +315,6 @@ def test_is_selected_user_key(rule_processor):
     result = rule_processor.is_selected_user_key('federatedID,nuver.yusser@example.com,')
     assert result
 
-@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
-def test_sync_umapi_users(get_users,rule_processor):
-    primary_adds = {'federatedID,nameless@example.com,': {'example group'},
-                    'federatedID,glaforge@example.com,': {'example group'}}
 
 def test_is_umapi_user_excluded(rule_processor):
     in_primary_org = True
@@ -741,31 +737,29 @@ def test_create_umapi_user(create_commands, rule_processor):
 
 
 @mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
-def test_example(update_umapi, rule_processor, mock_user_directory_data):
+def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
+    def compare_iterable(a, b):
+        if len(a) != len(b):
+            return False
+        return {x in b for x in a} == {x in b for x in a} == {True}
 
     umapi_connectors = mock.MagicMock()
-    umapi_connectors.get_secondary_connectors.return_value = {}
-    rule_processor.create_umapi_user =  mock.MagicMock()
+    secondary_connector = mock.MagicMock()
+    umapi_connectors.get_secondary_connectors.return_value = {"troy": secondary_connector}
+    umapi_info = UmapiTargetInfo("troy")
+    umapi_info.add_mapped_group("kellog")
+    rule_processor.umapi_info_by_name["troy"] = umapi_info
+    rule_processor.create_umapi_user = mock.MagicMock()
 
-    refined_users = {k:set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
-    update_umapi.return_value = refined_users
+    refined_users = {k: set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
+    primary_users = {k: refined_users[k] for k in list(refined_users.keys())[0:2]}
+    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:]}
+    update_umapi.side_effect = [primary_users, secondary_users]
 
     rule_processor.sync_umapi_users(umapi_connectors)
-    assert  rule_processor.primary_users_created == refined_users.keys()
+    assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
+    assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
 
     results = [c.args[0:2] for c in rule_processor.create_umapi_user.mock_calls]
     actual = [(k, v) for k, v in six.iteritems(refined_users)]
-    assert results == actual
-
-    print()
-
-    # rule_processor.directory_user_by_user_key['test'] = 'test'
-    #
-    # mock_command = MagicMock()
-    # create_commands.return_value = mock_command
-    # rule_processor.options['process_groups'] = True
-    # rule_processor.push_umapi = True
-    # rule_processor.create_umapi_user('test', set(), MagicMock(), MagicMock())
-    #
-    # called = [c[0] for c in mock_command.mock_calls][1:]
-    # assert called == ['remove_groups', 'add_groups']
+    assert compare_iterable(results, actual)
