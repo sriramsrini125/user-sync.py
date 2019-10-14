@@ -52,7 +52,7 @@ def mock_directory_user():
         'lastname': 'Six',
         'email': 'nameless@example.com',
         'groups': ['All Sea of Carag'],
-        'country': None,
+        'country': 'US',
         'member_groups': [],
         'source_attributes': {
             'email': 'nameless@example.com',

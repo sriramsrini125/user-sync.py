@@ -10,6 +10,10 @@ from mock import MagicMock
 from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo
 
 
+@pytest.fixture
+def rule_processor():
+    return RuleProcessor({})
+
 @mock.patch('user_sync.rules.UmapiConnectors')
 def test_log_action_summary_example(uc, rule_processor, log_stream):
     connector = mock.MagicMock()
@@ -27,7 +31,7 @@ def test_log_action_summary_example(uc, rule_processor, log_stream):
 
     result = stream.getvalue()
 
-    expected = """---------------------------- Action Summary (TEST MODE) ----------------------------
+    expected = """---------------------------------- Action Summary ----------------------------------
                                   Number of directory users read: 0
                     Number of directory users selected for input: 0
                                       Number of Adobe users read: 0
@@ -37,7 +41,6 @@ def test_log_action_summary_example(uc, rule_processor, log_stream):
                           Number of matching Adobe users updated: 0
                              Number of Adobe user-groups created: 0
                       Number of Adobe users added to secondaries: 0
-                              Number of Adobe-only users removed: 0
     Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
   Number of secondary UMAPI actions sent (total, success, error): (10, 8, 2)
 ------------------------------------------------------------------------------------
@@ -267,6 +270,7 @@ def test_add_stray(rule_processor):
 def test_process_stray(rule_processor, log_stream):
     stream, logger = log_stream
     rule_processor.logger = logger
+    rule_processor.will_manage_strays = True
     with mock.patch("user_sync.rules.RuleProcessor.manage_strays"):
         rule_processor.stray_key_map = {
             None: {
@@ -353,7 +357,7 @@ def test_log_action_summary(uc, rule_processor, log_stream):
     rule_processor.log_action_summary(uc)
 
     result = stream.getvalue()
-    expected = """---------------------------- Action Summary (TEST MODE) ----------------------------
+    expected = """---------------------------------- Action Summary ----------------------------------
                                   Number of directory users read: 0
                     Number of directory users selected for input: 0
                                       Number of Adobe users read: 0
@@ -363,7 +367,6 @@ def test_log_action_summary(uc, rule_processor, log_stream):
                           Number of matching Adobe users updated: 0
                              Number of Adobe user-groups created: 0
                       Number of Adobe users added to secondaries: 0
-                              Number of Adobe-only users removed: 0
     Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
   Number of secondary UMAPI actions sent (total, success, error): (10, 8, 2)
 ------------------------------------------------------------------------------------
@@ -428,6 +431,7 @@ def test_create_umapi_commands_for_directory_user_country_code(rule_processor, l
 
     # Default Country Code as None and Id Type as federatedID. Country as None in mock_directory_user
     rule_processor.options['default_country_code'] = None
+    mock_directory_user['country'] = None
     result = rule_processor.create_umapi_commands_for_directory_user(mock_directory_user)
     assert result == None
     stream.flush()
@@ -454,6 +458,8 @@ def test_create_umapi_commands_for_directory_user_country_code(rule_processor, l
 def test_update_umapi_users_for_connector(rule_processor, mock_user_directory_data, mock_umapi_user_data, log_stream):
     stream, logger = log_stream
     rule_processor.logger = logger
+    rule_processor.options['process_groups'] = True
+    rule_processor.will_process_strays = True
     umapi_connector = mock.MagicMock()
     umapi_connector.iter_users.return_value = mock_umapi_user_data
     umapi_info = mock.MagicMock()
@@ -737,11 +743,6 @@ def mock_umapi_user_data():
             'type': 'federatedID'}]
 
 
-@pytest.fixture
-def rule_processor(caller_options):
-    return RuleProcessor(caller_options)
-
-
 @mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
 def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
     def compare_iterable(a, b):
@@ -772,40 +773,4 @@ def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data
     assert compare_iterable(results, actual)
 
 
-@pytest.fixture
-def caller_options():
-    return {
-        'adobe_group_filter': None,
-        'after_mapping_hook': None,
-        'default_country_code': 'US',
-        'delete_strays': False,
-        'directory_group_filter': None,
-        'disentitle_strays': False,
-        'exclude_groups': [],
-        'exclude_identity_types': ['adobeID'],
-        'exclude_strays': False,
-        'exclude_users': [],
-        'extended_attributes': None,
-        'process_groups': True,
-        'max_adobe_only_users': 200,
-        'new_account_type': 'federatedID',
-        'remove_strays': True,
-        'strategy': 'sync',
-        'stray_list_input_path': None,
-        'stray_list_output_path': None,
-        'test_mode': True,
-        'update_user_info': False,
-        'username_filter_regex': None,
-        'adobe_only_user_action': ['remove'],
-        'adobe_only_user_list': None,
-        'adobe_users': ['all'],
-        'config_filename': 'tests/fixture/user-sync-config.yml',
-        'connector': 'ldap',
-        'encoding_name': 'utf8',
-        'user_filter': None,
-        'users': None,
-        'directory_connector_type': 'csv',
-        'directory_connector_overridden_options': {
-            'file_path': '../tests/fixture/remove-data.csv'},
-        'adobe_group_mapped': False,
-        'additional_groups': []}
+
