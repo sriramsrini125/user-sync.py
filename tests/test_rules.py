@@ -14,39 +14,182 @@ from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo
 def rule_processor():
     return RuleProcessor({})
 
-@mock.patch('user_sync.rules.UmapiConnectors')
-def test_log_action_summary_example(uc, rule_processor, log_stream):
-    connector = mock.MagicMock()
-    am = mock.MagicMock()
-    am.get_statistics.return_value = (10, 2)
-    connector.get_action_manager.return_value = am
-    uc.get_primary_connector.return_value = connector
-    uc.get_secondary_connectors.return_value = {
-        'secondary': connector
+
+def test_read_desired_user_groups(rule_processor, log_stream, mock_directory_user):
+    rp = rule_processor
+    stream, logger = log_stream
+    rp.logger = logger
+    mock_directory_user['groups'] = ['security_group']
+
+    directory_connector = mock.MagicMock()
+    directory_connector.load_users_and_groups.return_value = [mock_directory_user]
+    mappings = {
+        'security_group': [AdobeGroup.create('user_group')]
     }
 
-    stream, logger = log_stream
-    rule_processor.logger = logger
-    rule_processor.log_action_summary(uc)
+    rp.read_desired_user_groups(mappings, directory_connector)
 
-    result = stream.getvalue()
+    # Assert the security group and adobe group end up in the correct scope
+    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
+    assert "user_group" in rp.after_mapping_hook_scope['target_groups']
 
-    expected = """---------------------------------- Action Summary ----------------------------------
-                                  Number of directory users read: 0
-                    Number of directory users selected for input: 0
-                                      Number of Adobe users read: 0
-                     Number of Adobe users excluded from updates: 0
-              Number of non-excluded Adobe users with no changes: 0
-                                 Number of new Adobe users added: 0
-                          Number of matching Adobe users updated: 0
-                             Number of Adobe user-groups created: 0
-                      Number of Adobe users added to secondaries: 0
-    Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
-  Number of secondary UMAPI actions sent (total, success, error): (10, 8, 2)
-------------------------------------------------------------------------------------
+    # Assert the user group updated in umapi info
+    user_key = rp.get_directory_user_key(mock_directory_user)
+    assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
+
+    # testing after_mapping_hooks
+    AdobeGroup.create('existing_group')
+
+    after_mapping_hook_text = """
+first = source_attributes.get('givenName')
+if first is not None: 
+  target_groups.add('scope_group')
+target_groups.add('existing_group')
 """
 
-    assert expected == result
+    hook_code = compile(after_mapping_hook_text, '<per-user after-mapping-hook>', 'exec')
+    rp.options['after_mapping_hook'] = hook_code
+    rp.read_desired_user_groups(mappings, directory_connector)
+    stream.flush()
+    logger_output = stream.getvalue()
+
+    assert 'Target adobe group scope_group is not known; ignored' in logger_output
+    assert rp.umapi_info_by_name[None].desired_groups_by_user_key == {
+        user_key: {'user_group', 'existing_group'}
+    }
+
+    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
+    assert "existing_group" in rp.after_mapping_hook_scope['target_groups']
+
+    # testing additional_groups
+    rp.options['after_mapping_hook'] = None
+    mock_directory_user['member_groups'] = ['other_security_group', 'security_group', 'more_security_group']
+    rp.options['additional_groups'] = [
+        {
+            'source': re.compile('other(.+)'),
+            'target': AdobeGroup.create('additional_user_group')},
+        {
+            'source': re.compile('security_group'),
+            'target': AdobeGroup.create('additional(.+)')}]
+
+    rp.read_desired_user_groups(mappings, directory_connector)
+    assert 'other_security_group' in rp.umapi_info_by_name[None].additional_group_map[
+        'additional_user_group']
+    assert 'security_group' in rp.umapi_info_by_name[None].additional_group_map[
+        'additional(.+)']
+    assert {'additional_user_group', 'additional(.+)'}.issubset(
+        rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
+
+
+@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
+def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
+    def compare_iterable(a, b):
+        if len(a) != len(b):
+            return False
+        return {x in b for x in a} == {x in b for x in a} == {True}
+
+    umapi_connectors = mock.MagicMock()
+    secondary_connector = mock.MagicMock()
+    umapi_connectors.get_secondary_connectors.return_value = {
+        "troy": secondary_connector}
+    umapi_info = UmapiTargetInfo("troy")
+    umapi_info.add_mapped_group("kellog")
+    rule_processor.umapi_info_by_name["troy"] = umapi_info
+    rule_processor.create_umapi_user = mock.MagicMock()
+
+    refined_users = {k: set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
+    primary_users = {k: refined_users[k] for k in list(refined_users.keys())[0:2]}
+    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:]}
+    update_umapi.side_effect = [primary_users, secondary_users]
+
+    rule_processor.sync_umapi_users(umapi_connectors)
+    assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
+    assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
+
+    results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
+    actual = [(k, v) for k, v in six.iteritems(refined_users)]
+    assert compare_iterable(results, actual)
+
+
+@mock.patch('user_sync.rules.UmapiConnectors')
+def test_create_umapi_groups(uc, rule_processor, log_stream):
+    stream, logger = log_stream
+    rule_processor.logger = logger
+    umapi_connector = mock.MagicMock()
+    umapi_connector.name = 'primary'
+    umapi_connector.get_groups.return_value = [
+        {
+            'groupId': 94663221,
+            'groupName': 'existing_user_group',
+            'type': 'SYSADMIN_GROUP',
+            'memberCount': 41},
+        {
+            'groupId': 94663220,
+            'groupName': 'a_user_group',
+            'type': 'SYSADMIN_GROUP',
+            'memberCount': 41
+        }
+    ]
+
+    uc.connectors = [umapi_connector]
+    umapi_info = mock.MagicMock()
+    umapi_info.get_non_normalize_mapped_groups.return_value = {'non_existing_user_group', 'existing_user_group'}
+    rule_processor.umapi_info_by_name = {
+        None: umapi_info}
+    rule_processor.create_umapi_groups(uc)
+    stream.flush()
+    logger_output = stream.getvalue()
+    called_methods = [c[0] for c in umapi_connector.mock_calls]
+    assert 'create_group' and 'get_groups' in called_methods
+    assert "Auto create user-group enabled: Creating 'non_existing_user_group' on 'primary org'\n" in logger_output
+
+    # testing exception handling
+    umapi_connector.create_group.side_effect = ValueError('Exception Thrown')
+    rule_processor.create_umapi_groups(uc)
+    stream.flush()
+    logger_output = stream.getvalue()
+    assert 'Exception Thrown' in logger_output
+
+
+def test_process_strays(rule_processor, log_stream):
+    stream, logger = log_stream
+    rule_processor.logger = logger
+    rule_processor.will_manage_strays = True
+    with mock.patch("user_sync.rules.RuleProcessor.manage_strays"):
+        rule_processor.stray_key_map = {
+            None: {
+                'federatedID,testuser2000@example.com,': set()}}
+        rule_processor.process_strays({})
+
+        stream.flush()
+        actual_logger_output = stream.getvalue()
+        assert "Processing Adobe-only users..." in actual_logger_output
+
+    rule_processor.options["max_adobe_only_users"] = 0
+    rule_processor.process_strays({})
+    stream.flush()
+    actual_logger_output = stream.getvalue()
+    assert "Unable to process Adobe-only users" in actual_logger_output
+    assert rule_processor.action_summary["primary_strays_processed"] == 0
+
+    rule_processor.primary_user_count = 10
+    rule_processor.excluded_user_count = 1
+    rule_processor.options["max_adobe_only_users"] = "5%"
+    rule_processor.process_strays({})
+    stream.flush()
+    actual_logger_output = stream.getvalue()
+    assert "Unable to process Adobe-only users" in actual_logger_output
+    assert rule_processor.action_summary["primary_strays_processed"] == 0
+
+    with mock.patch("user_sync.rules.RuleProcessor.manage_strays"):
+        rule_processor.stray_key_map = {
+            None: {
+                'federatedID,testuser2000@example.com,': set()}}
+        rule_processor.options["max_adobe_only_users"] = "20%"
+        rule_processor.process_strays({})
+        stream.flush()
+        actual_logger_output = stream.getvalue()
+        assert "Processing Adobe-only users..." in actual_logger_output
 
 
 @mock.patch('user_sync.helper.CSVAdapter.read_csv_rows')
@@ -267,45 +410,7 @@ def test_add_stray(rule_processor):
     assert rule_processor.stray_key_map[None][user_key_mock_data] == removed_groups_mock_data
 
 
-def test_process_stray(rule_processor, log_stream):
-    stream, logger = log_stream
-    rule_processor.logger = logger
-    rule_processor.will_manage_strays = True
-    with mock.patch("user_sync.rules.RuleProcessor.manage_strays"):
-        rule_processor.stray_key_map = {
-            None: {
-                'federatedID,testuser2000@example.com,': set()}}
-        rule_processor.process_strays({})
 
-        stream.flush()
-        actual_logger_output = stream.getvalue()
-        assert "Processing Adobe-only users..." in actual_logger_output
-
-    rule_processor.options["max_adobe_only_users"] = 0
-    rule_processor.process_strays({})
-    stream.flush()
-    actual_logger_output = stream.getvalue()
-    assert "Unable to process Adobe-only users" in actual_logger_output
-    assert rule_processor.action_summary["primary_strays_processed"] == 0
-
-    rule_processor.primary_user_count = 10
-    rule_processor.excluded_user_count = 1
-    rule_processor.options["max_adobe_only_users"] = "5%"
-    rule_processor.process_strays({})
-    stream.flush()
-    actual_logger_output = stream.getvalue()
-    assert "Unable to process Adobe-only users" in actual_logger_output
-    assert rule_processor.action_summary["primary_strays_processed"] == 0
-
-    with mock.patch("user_sync.rules.RuleProcessor.manage_strays"):
-        rule_processor.stray_key_map = {
-            None: {
-                'federatedID,testuser2000@example.com,': set()}}
-        rule_processor.options["max_adobe_only_users"] = "20%"
-        rule_processor.process_strays({})
-        stream.flush()
-        actual_logger_output = stream.getvalue()
-        assert "Processing Adobe-only users..." in actual_logger_output
 
 
 def test_is_selected_user_key(rule_processor):
@@ -373,46 +478,6 @@ def test_log_action_summary(uc, rule_processor, log_stream):
 """
 
     assert expected == result
-
-
-@mock.patch('user_sync.rules.UmapiConnectors')
-def test_create_umapi_groups(uc, rule_processor, log_stream):
-    stream, logger = log_stream
-    rule_processor.logger = logger
-    umapi_connector = mock.MagicMock()
-    umapi_connector.name = 'primary'
-    umapi_connector.get_groups.return_value = [
-        {
-            'groupId': 94663221,
-            'groupName': 'existing_user_group',
-            'type': 'SYSADMIN_GROUP',
-            'memberCount': 41},
-        {
-            'groupId': 94663220,
-            'groupName': 'a_user_group',
-            'type': 'SYSADMIN_GROUP',
-            'memberCount': 41
-        }
-    ]
-
-    uc.connectors = [umapi_connector]
-    umapi_info = mock.MagicMock()
-    umapi_info.get_non_normalize_mapped_groups.return_value = {'non_existing_user_group', 'existing_user_group'}
-    rule_processor.umapi_info_by_name = {
-        None: umapi_info}
-    rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    called_methods = [c[0] for c in umapi_connector.mock_calls]
-    assert 'create_group' and 'get_groups' in called_methods
-    assert "Auto create user-group enabled: Creating 'non_existing_user_group' on 'primary org'\n" in logger_output
-
-    # testing exception handling
-    umapi_connector.create_group.side_effect = ValueError('Exception Thrown')
-    rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    assert 'Exception Thrown' in logger_output
 
 
 def test_create_umapi_commands_for_directory_user_update_username(rule_processor, mock_directory_user):
@@ -531,72 +596,6 @@ def test_update_umapi_user(rule_processor, log_stream, mock_umapi_user):
     assert mock_umapi_user["email"] == mock_umapi_user["username"]
 
 
-def test_read_desired_user_groups(rule_processor, log_stream, mock_directory_user):
-    rp = rule_processor
-    stream, logger = log_stream
-    rp.logger = logger
-    mock_directory_user['groups'] = ['security_group']
-
-    directory_connector = mock.MagicMock()
-    directory_connector.load_users_and_groups.return_value = [mock_directory_user]
-    mappings = {
-        'security_group': [AdobeGroup.create('user_group')]
-    }
-
-    rp.read_desired_user_groups(mappings, directory_connector)
-
-    # Assert the security group and adobe group end up in the correct scope
-    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
-    assert "user_group" in rp.after_mapping_hook_scope['target_groups']
-
-    # Assert the user group updated in umapi info
-    user_key = rp.get_directory_user_key(mock_directory_user)
-    assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
-
-    # testing after_mapping_hooks
-    AdobeGroup.create('existing_group')
-
-    after_mapping_hook_text = """
-first = source_attributes.get('givenName')
-if first is not None: 
-  target_groups.add('scope_group')
-target_groups.add('existing_group')
-"""
-
-    hook_code = compile(after_mapping_hook_text, '<per-user after-mapping-hook>', 'exec')
-    rp.options['after_mapping_hook'] = hook_code
-    rp.read_desired_user_groups(mappings, directory_connector)
-    stream.flush()
-    logger_output = stream.getvalue()
-
-    assert 'Target adobe group scope_group is not known; ignored' in logger_output
-    assert rp.umapi_info_by_name[None].desired_groups_by_user_key == {
-        user_key: {'user_group', 'existing_group'}
-    }
-
-    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
-    assert "existing_group" in rp.after_mapping_hook_scope['target_groups']
-
-    # testing additional_groups
-    rp.options['after_mapping_hook'] = None
-    mock_directory_user['member_groups'] = ['other_security_group', 'security_group', 'more_security_group']
-    rp.options['additional_groups'] = [
-        {
-            'source': re.compile('other(.+)'),
-            'target': AdobeGroup.create('additional_user_group')},
-        {
-            'source': re.compile('security_group'),
-            'target': AdobeGroup.create('additional(.+)')}]
-
-    rp.read_desired_user_groups(mappings, directory_connector)
-    assert 'other_security_group' in rp.umapi_info_by_name[None].additional_group_map[
-        'additional_user_group']
-    assert 'security_group' in rp.umapi_info_by_name[None].additional_group_map[
-        'additional(.+)']
-    assert {'additional_user_group', 'additional(.+)'}.issubset(
-        rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
-
-
 @mock.patch("user_sync.rules.RuleProcessor.create_umapi_commands_for_directory_user")
 def test_create_umapi_user(create_commands, rule_processor):
     rule_processor.directory_user_by_user_key['test'] = 'test'
@@ -609,168 +608,3 @@ def test_create_umapi_user(create_commands, rule_processor):
 
     called = [c[0] for c in mock_command.mock_calls][1:]
     assert called == ['remove_groups', 'add_groups']
-
-
-@pytest.fixture
-def mock_user_directory_data():
-    return {
-        'federatedID,both1@example.com,':
-            {
-                'identity_type': 'federatedID',
-                'username': 'both1@example.com',
-                'domain': 'example.com',
-                'firstname': 'both1',
-                'lastname': 'one',
-                'email': 'both1@example.com',
-                'groups': ['All Sea of Carag'],
-                'country': 'US',
-                'member_groups': [],
-                'source_attributes': {
-                    'email': 'both1@example.com',
-                    'identity_type': None,
-                    'username': None,
-                    'domain': None,
-                    'givenName': 'both1',
-                    'sn': 'one',
-                    'c': 'US'}},
-        'federatedID,both2@example.com,':
-            {
-                'identity_type': 'federatedID',
-                'username': 'both2@example.com',
-                'domain': 'example.com',
-                'firstname': 'both2',
-                'lastname': 'one',
-                'email': 'both2@example.com',
-                'groups': ['All Sea of Carag'],
-                'country': 'US',
-                'member_groups': [],
-                'source_attributes': {
-                    'email': 'both2@example.com',
-                    'identity_type': None,
-                    'username': None,
-                    'domain': None,
-                    'givenName': 'both2',
-                    'sn': 'two',
-                    'c': 'US'}},
-        'federatedID,both3@example.com,':
-            {
-                'identity_type': 'federatedID',
-                'username': 'both3@example.com',
-                'domain': 'example.com',
-                'firstname': 'both3',
-                'lastname': 'one',
-                'email': 'both3@example.com',
-                'groups': ['All Sea of Carag'],
-                'country': 'US',
-                'member_groups': [],
-                'source_attributes': {
-                    'email': 'both3@example.com',
-                    'identity_type': None,
-                    'username': None,
-                    'domain': None,
-                    'givenName': 'both3',
-                    'sn': 'three',
-                    'c': 'US'}},
-        'federatedID,directory.only1@example.com,':
-            {
-                'identity_type': 'federatedID',
-                'username': 'directory.only1@example.com',
-                'domain': 'example.com',
-                'firstname': 'dir1',
-                'lastname': 'one',
-                'email': 'directory.only1example.com',
-                'groups': ['All Sea of Carag'],
-                'country': 'US',
-                'member_groups': [],
-                'source_attributes': {
-                    'email': 'directory.only1@example.com',
-                    'identity_type': None,
-                    'username': None,
-                    'domain': None,
-                    'givenName': 'dir1',
-                    'sn': 'one',
-                    'c': 'US'}}
-    }
-
-
-@pytest.fixture
-def mock_umapi_user_data():
-    return [
-        {
-            'email': 'both1@example.com',
-            'status': 'active',
-            'groups': ['_org_admin', 'group1'],
-            'username': 'both1@example.com',
-            'adminRoles': ['org'],
-            'domain': 'example.com',
-            'country': 'US',
-            'type': 'federatedID'},
-        {
-            'email': 'both2@example.com',
-            'status': 'active',
-            'groups': ['_org_admin', 'user_group'],
-            'username': 'both2@example.com',
-            'adminRoles': ['org'],
-            'domain': 'example.com',
-            'country': 'US',
-            'type': 'federatedID'},
-        {
-            'email': 'both3@example.com',
-            'status': 'active',
-            'groups': ['_org_admin', 'group1', 'user_group'],
-            'username': 'both3@example.com',
-            'adminRoles': ['org'],
-            'domain': 'example.com',
-            'country': 'US',
-            'type': 'federatedID'},
-        {
-            'email': 'adobe.only1@example.com',
-            'status': 'active',
-            'groups': ['_org_admin'],
-            'username': 'adobe.only1@example.com',
-            'adminRoles': ['org'],
-            'domain': 'example.com',
-            'country': 'US',
-            'type': 'federatedID'},
-        {
-            'email': 'exclude1@example.com',
-            'status': 'active',
-            'groups': ['_org_admin'],
-            'username': 'exclude1@example.com',
-            'adminRoles': ['org'],
-            'domain': 'example.com',
-            'country': 'US',
-            'type': 'federatedID'}]
-
-
-@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
-def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
-    def compare_iterable(a, b):
-        if len(a) != len(b):
-            return False
-        return {x in b for x in a} == {x in b for x in a} == {True}
-
-    umapi_connectors = mock.MagicMock()
-    secondary_connector = mock.MagicMock()
-    umapi_connectors.get_secondary_connectors.return_value = {
-        "troy": secondary_connector}
-    umapi_info = UmapiTargetInfo("troy")
-    umapi_info.add_mapped_group("kellog")
-    rule_processor.umapi_info_by_name["troy"] = umapi_info
-    rule_processor.create_umapi_user = mock.MagicMock()
-
-    refined_users = {k: set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
-    primary_users = {k: refined_users[k] for k in list(refined_users.keys())[0:2]}
-    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:]}
-    update_umapi.side_effect = [primary_users, secondary_users]
-
-    rule_processor.sync_umapi_users(umapi_connectors)
-    assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
-    assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
-
-    results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
-    actual = [(k, v) for k, v in six.iteritems(refined_users)]
-    assert compare_iterable(results, actual)
-
-
-
