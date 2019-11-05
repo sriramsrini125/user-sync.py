@@ -57,10 +57,31 @@ def test_log_action_summary(rule_processor, log_stream):
     assert expected == result
 
 
+def test_read_desired_user_groups_basic(rule_processor, mock_directory_user):
+    rp = rule_processor
+    mock_directory_user['groups'] = ['security_group']
+
+    directory_connector = mock.MagicMock()
+    directory_connector.load_users_and_groups.return_value = [mock_directory_user]
+    mappings = {
+        'security_group': [AdobeGroup.create('user_group')]
+    }
+
+    rp.read_desired_user_groups(mappings, directory_connector)
+
+    # Assert the security group and adobe group end up in the correct scope
+    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
+    assert "user_group" in rp.after_mapping_hook_scope['target_groups']
+
+    # Assert the user group updated in umapi info
+    user_key = rp.get_directory_user_key(mock_directory_user)
+    assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
+    assert user_key in rp.filtered_directory_user_by_user_key
+
 def test_read_desired_user_groups(rule_processor, log_stream, mock_directory_user):
     rp = rule_processor
-    stream, logger = log_stream
-    rp.logger = logger
+    stream, rp.logger = log_stream
+
     mock_directory_user['groups'] = ['security_group']
 
     directory_connector = mock.MagicMock()
