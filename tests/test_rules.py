@@ -1,7 +1,6 @@
+import csv
 import re
 from copy import deepcopy
-
-import csv
 
 import mock
 import pytest
@@ -336,7 +335,6 @@ def test_is_umapi_user_excluded(rule_processor):
     assert rule_processor.is_umapi_user_excluded(in_primary_org, user_key, current_groups)
 
 
-
 def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
     tmp_file = str(tmpdir.join('strays_test.csv'))
     stream, logger = log_stream
@@ -350,7 +348,7 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
         None: {
             'enterpriseID,adobe.user1@example.com,': set(),
             'federatedID,adobe.user2@example.com,': set()
-            }}
+        }}
     rule_processor.write_stray_key_map()
 
     stream.flush()
@@ -366,16 +364,17 @@ def test_write_stray_key_map(rule_processor, log_stream, tmpdir):
         reader = csv.reader(our_file)
         actual = list(reader)
         expected = [['type', 'username', 'domain', 'umapi'],
-                    ['enterpriseID', 'adobe.user1@example.com', '', ''],
-                    ['federatedID', 'adobe.user2@example.com', '', ''],
                     ['adobeID', 'remoab@example.com', '', 'secondary'],
-                    ['enterpriseID', 'adobe.user3@example.com', '', 'secondary']]
+                    ['enterpriseID', 'adobe.user3@example.com', '', 'secondary'],
+                    ['enterpriseID', 'adobe.user1@example.com', '', ''],
+                    ['federatedID', 'adobe.user2@example.com', '', '']]
         actual_str = [','.join(r) for r in actual]
         expected_str = [','.join(r) for r in expected]
         for row in actual_str[1:3]:
             assert row in expected_str[1:3]
         for row in actual_str[3:5]:
             assert row in expected_str[3:5]
+
 
 @mock.patch('user_sync.rules.UmapiConnectors')
 def test_log_action_summary(uc, rule_processor, log_stream):
@@ -821,4 +820,3 @@ def caller_options():
             'file_path': '../tests/fixture/remove-data.csv'},
         'adobe_group_mapped': False,
         'additional_groups': []}
-
