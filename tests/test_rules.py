@@ -1,3 +1,4 @@
+import csv
 import re
 from copy import deepcopy
 
@@ -7,6 +8,7 @@ import six
 import yaml
 from mock import MagicMock
 
+from tests.util import compare_iter
 from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo
 
 
@@ -333,6 +335,31 @@ def test_is_umapi_user_excluded(rule_processor):
     compiled_expression = re.compile(r'\A' + "adobe.user@example.com" + r'\Z', re.IGNORECASE)
     rule_processor.exclude_users = {compiled_expression}
     assert rule_processor.is_umapi_user_excluded(in_primary_org, user_key, current_groups)
+
+
+def test_write_stray_key_map(rule_processor, tmpdir):
+    tmp_file = str(tmpdir.join('strays_test.csv'))
+
+    rule_processor.stray_list_output_path = tmp_file
+    rule_processor.stray_key_map = {
+        'secondary': {
+            'adobeID,remoab@example.com,': set(),
+            'enterpriseID,adobe.user3@example.com,': set(), },
+        None: {
+            'enterpriseID,adobe.user1@example.com,': set(),
+            'federatedID,adobe.user2@example.com,': set()
+        }}
+
+    rule_processor.write_stray_key_map()
+    with open(tmp_file, 'r') as our_file:
+        reader = csv.reader(our_file)
+        actual = list(reader)
+        expected = [['type', 'username', 'domain', 'umapi'],
+                    ['adobeID', 'remoab@example.com', '', 'secondary'],
+                    ['enterpriseID', 'adobe.user3@example.com', '', 'secondary'],
+                    ['enterpriseID', 'adobe.user1@example.com', '', ''],
+                    ['federatedID', 'adobe.user2@example.com', '', '']]
+        assert compare_iter(actual, expected)
 
 
 @mock.patch('user_sync.rules.UmapiConnectors')
