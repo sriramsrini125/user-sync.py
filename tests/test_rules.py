@@ -152,11 +152,6 @@ target_groups.add('existing_group')
 
 @mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
 def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
-    def compare_iterable(a, b):
-        if len(a) != len(b):
-            return False
-        return {x in b for x in a} == {x in b for x in a} == {True}
-
     umapi_connectors = mock.MagicMock()
     secondary_connector = mock.MagicMock()
     umapi_connectors.get_secondary_connectors.return_value = {
@@ -172,12 +167,12 @@ def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data
     update_umapi.side_effect = [primary_users, secondary_users]
 
     rule_processor.sync_umapi_users(umapi_connectors)
-    assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
-    assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
+    assert compare_iter(rule_processor.primary_users_created, primary_users.keys())
+    assert compare_iter(rule_processor.secondary_users_created, secondary_users.keys())
 
     results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
     actual = [(k, v) for k, v in six.iteritems(refined_users)]
-    assert compare_iterable(results, actual)
+    assert compare_iter(results, actual)
 
 
 @mock.patch('user_sync.rules.UmapiConnectors')
