@@ -8,14 +8,15 @@ import six
 import yaml
 from mock import MagicMock
 
-from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo, UmapiConnectors
 from tests.util import compare_iter
 from user_sync.rules import RuleProcessor, AdobeGroup, UmapiTargetInfo
+from user_sync.rules import UmapiConnectors
 
 
 @pytest.fixture
 def rule_processor():
     return RuleProcessor({})
+
 
 class MockUmapiConnector(MagicMock):
     class MockActionManager:
@@ -35,7 +36,8 @@ class MockUmapiConnector(MagicMock):
 def test_log_action_summary(rule_processor, log_stream):
     primary = MockUmapiConnector()
     secondary = MockUmapiConnector('secondary')
-    connectors = UmapiConnectors(primary, {'secondary': secondary})
+    connectors = UmapiConnectors(primary, {
+        'secondary': secondary})
 
     stream, logger = log_stream
     rule_processor.logger = logger
@@ -80,6 +82,7 @@ def test_read_desired_user_groups_basic(rule_processor, mock_directory_user):
     user_key = rp.get_directory_user_key(mock_directory_user)
     assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
     assert user_key in rp.filtered_directory_user_by_user_key
+
 
 def test_read_desired_user_groups(rule_processor, log_stream, mock_directory_user):
     rp = rule_processor
