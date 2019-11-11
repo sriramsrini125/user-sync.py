@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import mock
 import pytest
+import six
 import yaml
 from mock import MagicMock
 
@@ -781,6 +782,36 @@ def mock_umapi_user_data():
 @pytest.fixture
 def rule_processor(caller_options):
     return RuleProcessor(caller_options)
+
+
+@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
+def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
+    def compare_iterable(a, b):
+        if len(a) != len(b):
+            return False
+        return {x in b for x in a} == {x in b for x in a} == {True}
+
+    umapi_connectors = mock.MagicMock()
+    secondary_connector = mock.MagicMock()
+    umapi_connectors.get_secondary_connectors.return_value = {
+        "troy": secondary_connector}
+    umapi_info = UmapiTargetInfo("troy")
+    umapi_info.add_mapped_group("kellog")
+    rule_processor.umapi_info_by_name["troy"] = umapi_info
+    rule_processor.create_umapi_user = mock.MagicMock()
+
+    refined_users = {k: set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
+    primary_users = {k: refined_users[k] for k in list(refined_users.keys())[0:2]}
+    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:]}
+    update_umapi.side_effect = [primary_users, secondary_users]
+
+    rule_processor.sync_umapi_users(umapi_connectors)
+    assert compare_iterable(rule_processor.primary_users_created, primary_users.keys())
+    assert compare_iterable(rule_processor.secondary_users_created, secondary_users.keys())
+
+    results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
+    actual = [(k, v) for k, v in six.iteritems(refined_users)]
+    assert compare_iterable(results, actual)
 
 
 @pytest.fixture
