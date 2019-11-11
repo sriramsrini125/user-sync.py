@@ -204,7 +204,7 @@ def test_get_directory_connector_configs(cli_args, config_files):
 
     # Test method to verify 'okta', 'csv', 'ldap' are in the accessed_keys set
     result = config_loader.main_config.child_configs.get('directory_users').child_configs['connectors'].accessed_keys
-    assert result == {'csv', 'okta', 'adobe_console', 'ldap'}
+    assert result == {'okta', 'adobe_console', 'csv', 'ldap'}
 
 
 def test_get_directory_connector_module_name(cli_args, config_files):
