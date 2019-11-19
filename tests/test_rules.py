@@ -64,112 +64,105 @@ def test_log_action_summary(rule_processor, log_stream):
 
 def test_read_desired_user_groups_basic(rule_processor, mock_directory_user):
     rp = rule_processor
-    mock_directory_user['groups'] = ['security_group']
+    mock_directory_user['groups'] = ['Group A', 'Group B']
 
     directory_connector = mock.MagicMock()
     directory_connector.load_users_and_groups.return_value = [mock_directory_user]
-    mappings = {
-        'security_group': [AdobeGroup.create('user_group')]
-    }
-
+    mappings = {'Group A': [AdobeGroup.create('Console Group')]}
     rp.read_desired_user_groups(mappings, directory_connector)
 
     # Assert the security group and adobe group end up in the correct scope
-    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
-    assert "user_group" in rp.after_mapping_hook_scope['target_groups']
+    assert "Group A" in rp.after_mapping_hook_scope['source_groups']
+    assert "Console Group" in rp.after_mapping_hook_scope['target_groups']
 
     # Assert the user group updated in umapi info
     user_key = rp.get_directory_user_key(mock_directory_user)
-    assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
+    assert ('console group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
     assert user_key in rp.filtered_directory_user_by_user_key
 
 
-def test_read_desired_user_groups(rule_processor, log_stream, mock_directory_user):
+def test_after_mapping_hook(rule_processor, mock_directory_user):
     rp = rule_processor
-    stream, rp.logger = log_stream
-
-    mock_directory_user['groups'] = ['security_group']
-
+    mock_directory_user['groups'] = ['Group A']
     directory_connector = mock.MagicMock()
     directory_connector.load_users_and_groups.return_value = [mock_directory_user]
-    mappings = {
-        'security_group': [AdobeGroup.create('user_group')]
-    }
-
-    rp.read_desired_user_groups(mappings, directory_connector)
-
-    # Assert the security group and adobe group end up in the correct scope
-    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
-    assert "user_group" in rp.after_mapping_hook_scope['target_groups']
-
-    # Assert the user group updated in umapi info
-    user_key = rp.get_directory_user_key(mock_directory_user)
-    assert ('user_group' in rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
 
     # testing after_mapping_hooks
-    AdobeGroup.create('existing_group')
-
     after_mapping_hook_text = """
 first = source_attributes.get('givenName')
 if first is not None: 
-  target_groups.add('scope_group')
-target_groups.add('existing_group')
+  target_groups.add('ext group 1')
+target_groups.add('ext group 2')
 """
 
-    hook_code = compile(after_mapping_hook_text, '<per-user after-mapping-hook>', 'exec')
-    rp.options['after_mapping_hook'] = hook_code
-    rp.read_desired_user_groups(mappings, directory_connector)
-    stream.flush()
-    logger_output = stream.getvalue()
+    AdobeGroup.create('existing_group')
+    rp.options['after_mapping_hook'] = compile(
+        after_mapping_hook_text, '<per-user after-mapping-hook>', 'exec')
 
-    assert 'Target adobe group scope_group is not known; ignored' in logger_output
-    assert rp.umapi_info_by_name[None].desired_groups_by_user_key == {
-        user_key: {'user_group', 'existing_group'}
-    }
+    rp.read_desired_user_groups({}, directory_connector)
+    assert "Group A" in rp.after_mapping_hook_scope['source_groups']
+    assert "ext group 1" in rp.after_mapping_hook_scope['target_groups']
+    assert "ext group 2" in rp.after_mapping_hook_scope['target_groups']
 
-    assert "security_group" in rp.after_mapping_hook_scope['source_groups']
-    assert "existing_group" in rp.after_mapping_hook_scope['target_groups']
 
-    # testing additional_groups
-    rp.options['after_mapping_hook'] = None
+def test_additional_groups(rule_processor, log_stream, mock_directory_user):
+    rp = rule_processor
     mock_directory_user['member_groups'] = ['other_security_group', 'security_group', 'more_security_group']
+
+    directory_connector = mock.MagicMock()
+    directory_connector.load_users_and_groups.return_value = [mock_directory_user]
+    user_key = rp.get_directory_user_key(mock_directory_user)
+
     rp.options['additional_groups'] = [
         {
             'source': re.compile('other(.+)'),
             'target': AdobeGroup.create('additional_user_group')},
         {
             'source': re.compile('security_group'),
-            'target': AdobeGroup.create('additional(.+)')}]
+            'target': AdobeGroup.create('additional(.+)')}
+    ]
 
-    rp.read_desired_user_groups(mappings, directory_connector)
-    assert 'other_security_group' in rp.umapi_info_by_name[None].additional_group_map[
-        'additional_user_group']
-    assert 'security_group' in rp.umapi_info_by_name[None].additional_group_map[
-        'additional(.+)']
+    rp.read_desired_user_groups({}, directory_connector)
+    assert 'other_security_group' in rp.umapi_info_by_name[None].additional_group_map['additional_user_group']
+    assert 'security_group' in rp.umapi_info_by_name[None].additional_group_map['additional(.+)']
     assert {'additional_user_group', 'additional(.+)'}.issubset(
         rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
 
-
 @mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
 def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
-    umapi_connectors = mock.MagicMock()
-    secondary_connector = mock.MagicMock()
-    umapi_connectors.get_secondary_connectors.return_value = {
-        "troy": secondary_connector}
-    umapi_info = UmapiTargetInfo("troy")
-    umapi_info.add_mapped_group("kellog")
-    rule_processor.umapi_info_by_name["troy"] = umapi_info
+
+    # Create 3 umapi connectors - 1 primary, 2 secondary
+    secondary_umapi_name = 'umapi-2'
+    third_umapi_name = 'umapi-3'
+    umapi_connectors = UmapiConnectors(
+        MockUmapiConnector(),
+        {secondary_umapi_name: MockUmapiConnector(name=secondary_umapi_name),
+        third_umapi_name: MockUmapiConnector(name=third_umapi_name)})
+
+    umapi_info = UmapiTargetInfo(secondary_umapi_name)
+    umapi_info.add_mapped_group("Not zero")
+
+    # Add the umapi infos + group for secondaries so they will not be skipped
+    rule_processor.umapi_info_by_name[secondary_umapi_name] = umapi_info
+    rule_processor.umapi_info_by_name[third_umapi_name] = umapi_info
+
+    # Use a mock object here to collect the calls made for validation
     rule_processor.create_umapi_user = mock.MagicMock()
 
+    # Just prepare a list of users from the mock data in the form of user_key:groups
+    # We use a mock method call to return users from the update commands
     refined_users = {k: set(v.pop('groups')) for k, v in six.iteritems(mock_user_directory_data)}
     primary_users = {k: refined_users[k] for k in list(refined_users.keys())[0:2]}
-    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:]}
-    update_umapi.side_effect = [primary_users, secondary_users]
-
+    secondary_users = {k: refined_users[k] for k in list(refined_users.keys())[2:3]}
+    third_users = {k: refined_users[k] for k in list(refined_users.keys())[3:]}
+    update_umapi.side_effect = [primary_users, secondary_users, third_users]
     rule_processor.sync_umapi_users(umapi_connectors)
-    assert compare_iter(rule_processor.primary_users_created, primary_users.keys())
-    assert compare_iter(rule_processor.secondary_users_created, secondary_users.keys())
 
+    # Check that the users were correctly returned and sorted from update_umapi_users calls
+    assert compare_iter(rule_processor.primary_users_created, primary_users.keys())
+    assert compare_iter(rule_processor.secondary_users_created, list(refined_users.keys())[2:])
+
+    # Checks that create user was called for all of the users
     results = [c[1][0:2] for c in rule_processor.create_umapi_user.mock_calls]
     actual = [(k, v) for k, v in six.iteritems(refined_users)]
     assert compare_iter(results, actual)
@@ -529,42 +522,6 @@ def test_write_stray_key_map(rule_processor, tmpdir):
                     ['federatedID', 'adobe.user2@example.com', '', '']]
         assert compare_iter(actual, expected)
 
-
-@mock.patch('user_sync.rules.UmapiConnectors')
-def test_log_action_summary(uc, rule_processor, log_stream):
-    class mock_am:
-        @staticmethod
-        def get_statistics():
-            return 10, 2
-
-    connector = mock.MagicMock()
-    connector.get_action_manager.return_value = mock_am
-    uc.get_primary_connector.return_value = connector
-    uc.get_secondary_connectors.return_value = {
-        'secondary': connector}
-
-    stream, logger = log_stream
-    rule_processor.logger = logger
-    rule_processor.log_action_summary(uc)
-
-    result = stream.getvalue()
-    expected = """---------------------------- Action Summary (TEST MODE) ----------------------------
-                                  Number of directory users read: 0
-                    Number of directory users selected for input: 0
-                                      Number of Adobe users read: 0
-                     Number of Adobe users excluded from updates: 0
-              Number of non-excluded Adobe users with no changes: 0
-                                 Number of new Adobe users added: 0
-                          Number of matching Adobe users updated: 0
-                             Number of Adobe user-groups created: 0
-                      Number of Adobe users added to secondaries: 0
-                              Number of Adobe-only users removed: 0
-    Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
-  Number of secondary UMAPI actions sent (total, success, error): (10, 8, 2)
-------------------------------------------------------------------------------------
-"""
-
-    assert expected == result
 
 
 @mock.patch('user_sync.rules.UmapiConnectors')
