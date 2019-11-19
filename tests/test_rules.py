@@ -18,6 +18,27 @@ def rule_processor():
     return RuleProcessor({})
 
 
+@pytest.fixture()
+def mock_umapi_connectors():
+    def _mock_umapi_connectors(*args):
+        return UmapiConnectors(
+            MockUmapiConnector(),
+            {a: MockUmapiConnector(name=a) for a in args})
+
+    return _mock_umapi_connectors
+
+
+@pytest.fixture()
+def mock_umapi_info():
+    def _mock_umapi_info(name='primary', groups=[]):
+        mock_umapi_info = UmapiTargetInfo(name)
+        for g in groups:
+            mock_umapi_info.add_mapped_group(g)
+        return mock_umapi_info
+
+    return _mock_umapi_info
+
+
 class MockUmapiConnector(MagicMock):
     class MockActionManager:
         def get_statistics(self):
@@ -33,33 +54,28 @@ class MockUmapiConnector(MagicMock):
         return self.action_manager
 
 
-def test_log_action_summary(rule_processor, log_stream):
-    primary = MockUmapiConnector()
-    secondary = MockUmapiConnector('secondary')
-    connectors = UmapiConnectors(primary, {
-        'secondary': secondary})
-
+def test_log_action_summary(rule_processor, log_stream, mock_umapi_connectors):
+    connectors = mock_umapi_connectors('umapi-2', 'umapi-3')
     stream, logger = log_stream
     rule_processor.logger = logger
     rule_processor.log_action_summary(connectors)
-
-    result = stream.getvalue()
-    expected = """---------------------------------- Action Summary ----------------------------------
-                                  Number of directory users read: 0
-                    Number of directory users selected for input: 0
-                                      Number of Adobe users read: 0
-                     Number of Adobe users excluded from updates: 0
-              Number of non-excluded Adobe users with no changes: 0
-                                 Number of new Adobe users added: 0
-                          Number of matching Adobe users updated: 0
-                             Number of Adobe user-groups created: 0
-                      Number of Adobe users added to secondaries: 0
-    Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
-  Number of secondary UMAPI actions sent (total, success, error): (10, 8, 2)
-------------------------------------------------------------------------------------
-"""
-
-    assert expected == result
+    expected = \
+        """---------------------------------- Action Summary ----------------------------------
+                                    Number of directory users read: 0
+                      Number of directory users selected for input: 0
+                                        Number of Adobe users read: 0
+                       Number of Adobe users excluded from updates: 0
+                Number of non-excluded Adobe users with no changes: 0
+                                   Number of new Adobe users added: 0
+                            Number of matching Adobe users updated: 0
+                               Number of Adobe user-groups created: 0
+                        Number of Adobe users added to secondaries: 0
+      Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
+      Number of umapi-2 UMAPI actions sent (total, success, error): (10, 8, 2)
+      Number of umapi-3 UMAPI actions sent (total, success, error): (10, 8, 2)
+    ------------------------------------------------------------------------------------
+    """
+    assert expected == stream.getvalue()
 
 
 def test_read_desired_user_groups_basic(rule_processor, mock_directory_user):
@@ -68,7 +84,8 @@ def test_read_desired_user_groups_basic(rule_processor, mock_directory_user):
 
     directory_connector = mock.MagicMock()
     directory_connector.load_users_and_groups.return_value = [mock_directory_user]
-    mappings = {'Group A': [AdobeGroup.create('Console Group')]}
+    mappings = {
+        'Group A': [AdobeGroup.create('Console Group')]}
     rp.read_desired_user_groups(mappings, directory_connector)
 
     # Assert the security group and adobe group end up in the correct scope
@@ -128,19 +145,15 @@ def test_additional_groups(rule_processor, log_stream, mock_directory_user):
     assert {'additional_user_group', 'additional(.+)'}.issubset(
         rp.umapi_info_by_name[None].desired_groups_by_user_key[user_key])
 
-@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
-def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data):
 
+@mock.patch("user_sync.rules.RuleProcessor.update_umapi_users_for_connector")
+def test_sync_umapi_users(update_umapi, rule_processor, mock_umapi_connectors, mock_user_directory_data,
+                          mock_umapi_info):
     # Create 3 umapi connectors - 1 primary, 2 secondary
     secondary_umapi_name = 'umapi-2'
     third_umapi_name = 'umapi-3'
-    umapi_connectors = UmapiConnectors(
-        MockUmapiConnector(),
-        {secondary_umapi_name: MockUmapiConnector(name=secondary_umapi_name),
-        third_umapi_name: MockUmapiConnector(name=third_umapi_name)})
-
-    umapi_info = UmapiTargetInfo(secondary_umapi_name)
-    umapi_info.add_mapped_group("Not zero")
+    umapi_connectors = mock_umapi_connectors(secondary_umapi_name, third_umapi_name)
+    umapi_info = mock_umapi_info(secondary_umapi_name, "Group")
 
     # Add the umapi infos + group for secondaries so they will not be skipped
     rule_processor.umapi_info_by_name[secondary_umapi_name] = umapi_info
@@ -168,44 +181,39 @@ def test_sync_umapi_users(update_umapi, rule_processor, mock_user_directory_data
     assert compare_iter(results, actual)
 
 
-@mock.patch('user_sync.rules.UmapiConnectors')
-def test_create_umapi_groups(uc, rule_processor, log_stream):
+def test_create_umapi_groups(rule_processor, log_stream, mock_umapi_connectors, mock_umapi_info):
     stream, logger = log_stream
     rule_processor.logger = logger
-    umapi_connector = mock.MagicMock()
-    umapi_connector.name = 'primary'
-    umapi_connector.get_groups.return_value = [
+    secondary_umapi_name = 'umapi-2'
+
+    uc = mock_umapi_connectors(secondary_umapi_name)
+    sec_conn = uc.secondary_connectors[secondary_umapi_name]
+    sec_conn.get_groups.return_value = {}
+    uc.primary_connector.get_groups.return_value = [
         {
             'groupId': 94663221,
-            'groupName': 'existing_user_group',
+            'groupName': 'existing_group',
             'type': 'SYSADMIN_GROUP',
             'memberCount': 41},
         {
             'groupId': 94663220,
-            'groupName': 'a_user_group',
+            'groupName': 'misc_group',
             'type': 'SYSADMIN_GROUP',
-            'memberCount': 41
+            'memberCount': 150
         }
     ]
 
-    uc.connectors = [umapi_connector]
-    umapi_info = mock.MagicMock()
-    umapi_info.get_non_normalize_mapped_groups.return_value = {'non_existing_user_group', 'existing_user_group'}
+    primary_info = mock_umapi_info(groups=['new_group', 'existing_group'])
+    sec_info = mock_umapi_info(secondary_umapi_name, ['new_group_2', 'new_group_3'])
     rule_processor.umapi_info_by_name = {
-        None: umapi_info}
+        None: primary_info,
+        sec_conn.name: sec_info}
     rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    called_methods = [c[0] for c in umapi_connector.mock_calls]
-    assert 'create_group' and 'get_groups' in called_methods
-    assert "Auto create user-group enabled: Creating 'non_existing_user_group' on 'primary org'\n" in logger_output
 
-    # testing exception handling
-    umapi_connector.create_group.side_effect = ValueError('Exception Thrown')
-    rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    assert 'Exception Thrown' in logger_output
+    calls = [c.args for c in uc.primary_connector.mock_calls]
+    calls.extend([c.args for c in sec_conn.mock_calls])
+    calls = [c[0] for c in calls if c]
+    assert compare_iter(calls, ['new_group', 'new_group_2', 'new_group_3'])
 
 
 def test_process_strays(rule_processor, log_stream):
@@ -521,47 +529,6 @@ def test_write_stray_key_map(rule_processor, tmpdir):
                     ['enterpriseID', 'adobe.user1@example.com', '', ''],
                     ['federatedID', 'adobe.user2@example.com', '', '']]
         assert compare_iter(actual, expected)
-
-
-
-@mock.patch('user_sync.rules.UmapiConnectors')
-def test_create_umapi_groups(uc, rule_processor, log_stream):
-    stream, logger = log_stream
-    rule_processor.logger = logger
-    umapi_connector = mock.MagicMock()
-    umapi_connector.name = 'primary'
-    umapi_connector.get_groups.return_value = [
-        {
-            'groupId': 94663221,
-            'groupName': 'existing_user_group',
-            'type': 'SYSADMIN_GROUP',
-            'memberCount': 41},
-        {
-            'groupId': 94663220,
-            'groupName': 'a_user_group',
-            'type': 'SYSADMIN_GROUP',
-            'memberCount': 41
-        }
-    ]
-
-    uc.connectors = [umapi_connector]
-    umapi_info = mock.MagicMock()
-    umapi_info.get_non_normalize_mapped_groups.return_value = {'non_existing_user_group', 'existing_user_group'}
-    rule_processor.umapi_info_by_name = {
-        None: umapi_info}
-    rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    called_methods = [c[0] for c in umapi_connector.mock_calls]
-    assert 'create_group' and 'get_groups' in called_methods
-    assert "Auto create user-group enabled: Creating 'non_existing_user_group' on 'primary org'\n" in logger_output
-
-    # testing exception handling
-    umapi_connector.create_group.side_effect = ValueError('Exception Thrown')
-    rule_processor.create_umapi_groups(uc)
-    stream.flush()
-    logger_output = stream.getvalue()
-    assert 'Exception Thrown' in logger_output
 
 
 def test_create_umapi_commands_for_directory_user_update_username(rule_processor, mock_directory_user):
