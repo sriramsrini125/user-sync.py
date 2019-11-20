@@ -59,22 +59,21 @@ def test_log_action_summary(rule_processor, log_stream, mock_umapi_connectors):
     stream, logger = log_stream
     rule_processor.logger = logger
     rule_processor.log_action_summary(connectors)
-    expected = \
-        """---------------------------------- Action Summary ----------------------------------
-                                    Number of directory users read: 0
-                      Number of directory users selected for input: 0
-                                        Number of Adobe users read: 0
-                       Number of Adobe users excluded from updates: 0
-                Number of non-excluded Adobe users with no changes: 0
-                                   Number of new Adobe users added: 0
-                            Number of matching Adobe users updated: 0
-                               Number of Adobe user-groups created: 0
-                        Number of Adobe users added to secondaries: 0
-      Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
-      Number of umapi-2 UMAPI actions sent (total, success, error): (10, 8, 2)
-      Number of umapi-3 UMAPI actions sent (total, success, error): (10, 8, 2)
-    ------------------------------------------------------------------------------------
-    """
+    expected = """---------------------------------- Action Summary ----------------------------------
+                                Number of directory users read: 0
+                  Number of directory users selected for input: 0
+                                    Number of Adobe users read: 0
+                   Number of Adobe users excluded from updates: 0
+            Number of non-excluded Adobe users with no changes: 0
+                               Number of new Adobe users added: 0
+                        Number of matching Adobe users updated: 0
+                           Number of Adobe user-groups created: 0
+                    Number of Adobe users added to secondaries: 0
+  Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
+  Number of umapi-2 UMAPI actions sent (total, success, error): (10, 8, 2)
+  Number of umapi-3 UMAPI actions sent (total, success, error): (10, 8, 2)
+------------------------------------------------------------------------------------
+"""
     assert expected == stream.getvalue()
 
 
