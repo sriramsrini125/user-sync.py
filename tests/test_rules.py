@@ -59,22 +59,21 @@ def test_log_action_summary(rule_processor, log_stream, mock_umapi_connectors):
     stream, logger = log_stream
     rule_processor.logger = logger
     rule_processor.log_action_summary(connectors)
-    expected = \
-        """---------------------------------- Action Summary ----------------------------------
-                                    Number of directory users read: 0
-                      Number of directory users selected for input: 0
-                                        Number of Adobe users read: 0
-                       Number of Adobe users excluded from updates: 0
-                Number of non-excluded Adobe users with no changes: 0
-                                   Number of new Adobe users added: 0
-                            Number of matching Adobe users updated: 0
-                               Number of Adobe user-groups created: 0
-                        Number of Adobe users added to secondaries: 0
-      Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
-      Number of umapi-2 UMAPI actions sent (total, success, error): (10, 8, 2)
-      Number of umapi-3 UMAPI actions sent (total, success, error): (10, 8, 2)
-    ------------------------------------------------------------------------------------
-    """
+    expected = """---------------------------------- Action Summary ----------------------------------
+                                Number of directory users read: 0
+                  Number of directory users selected for input: 0
+                                    Number of Adobe users read: 0
+                   Number of Adobe users excluded from updates: 0
+            Number of non-excluded Adobe users with no changes: 0
+                               Number of new Adobe users added: 0
+                        Number of matching Adobe users updated: 0
+                           Number of Adobe user-groups created: 0
+                    Number of Adobe users added to secondaries: 0
+  Number of primary UMAPI actions sent (total, success, error): (10, 8, 2)
+  Number of umapi-2 UMAPI actions sent (total, success, error): (10, 8, 2)
+  Number of umapi-3 UMAPI actions sent (total, success, error): (10, 8, 2)
+------------------------------------------------------------------------------------
+"""
     assert expected == stream.getvalue()
 
 
@@ -210,8 +209,8 @@ def test_create_umapi_groups(rule_processor, log_stream, mock_umapi_connectors, 
         sec_conn.name: sec_info}
     rule_processor.create_umapi_groups(uc)
 
-    calls = [c.args for c in uc.primary_connector.mock_calls]
-    calls.extend([c.args for c in sec_conn.mock_calls])
+    calls = [c[1] for c in uc.primary_connector.mock_calls]
+    calls.extend([c[1] for c in sec_conn.mock_calls])
     calls = [c[0] for c in calls if c]
     assert compare_iter(calls, ['new_group', 'new_group_2', 'new_group_3'])
 
