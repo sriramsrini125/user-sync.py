@@ -210,8 +210,8 @@ def test_create_umapi_groups(rule_processor, log_stream, mock_umapi_connectors, 
         sec_conn.name: sec_info}
     rule_processor.create_umapi_groups(uc)
 
-    calls = [c.args for c in uc.primary_connector.mock_calls]
-    calls.extend([c.args for c in sec_conn.mock_calls])
+    calls = [c[1] for c in uc.primary_connector.mock_calls]
+    calls.extend([c[1] for c in sec_conn.mock_calls])
     calls = [c[0] for c in calls if c]
     assert compare_iter(calls, ['new_group', 'new_group_2', 'new_group_3'])
 
