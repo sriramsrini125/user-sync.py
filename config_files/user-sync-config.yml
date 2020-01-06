@@ -1,0 +1,46 @@
+adobe_users:
+  exclude_identity_types:
+    - adobeID
+  exclude_adobe_groups:
+  exclude_users:
+  connectors:
+    umapi: connector-umapi.yml
+directory_users:
+  user_identity_type: federatedID
+  default_country_code: US
+  connectors:
+    ldap: connector-ldap.yml
+    multi:
+      - type: ldap
+        id: src1
+        path: connector-ldap.yml
+      - type: ldap
+        id: src2
+        path: connector-ldap2.yml
+      - type: ldap
+        id: src3
+        path: connector-ldap3.yml
+
+  groups:
+    - directory_group: One
+      adobe_groups:
+        - AishTest
+limits:
+  max_adobe_only_users: 200
+logging:
+  log_to_file: true
+  file_log_directory: logs
+  file_log_name_format: '{:%Y-%m-%d}.log'
+  file_log_level: info
+  console_log_level: info
+invocation_defaults:
+  adobe_only_user_action: preserve
+  adobe_only_user_list: null
+  adobe_users: all
+  connector: null
+  process_groups: No
+  strategy: sync
+  test_mode: No
+  update_user_info: No
+  user_filter: null
+  users: all

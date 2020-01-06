@@ -1,0 +1,9 @@
+server:
+  host: usermanagement-stage.adobe.io
+  ims_host: ims-na1-stg1.adobelogin.com
+enterprise:
+  org_id: D28927675A9581A20A49412A@AdobeOrg
+  api_key: 7d6dca1ae41446d5b04f66d8a16a8a97
+  client_secret: '884933dd-6180-40d1-902b-26e6261f6f22'
+  tech_acct: 8451072B5D3F382E0A494136@techacct.adobe.com
+  priv_key_path: 'private.key'
