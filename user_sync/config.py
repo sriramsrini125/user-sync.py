@@ -317,13 +317,14 @@ class ConfigLoader(object):
             multilist = connectors_config.get_list('multi', True)
             temp_ids=[]
             dup_dict = defaultdict(list)
-            for number, row in enumerate(multilist):
-                pathinfo = row['path']
-                if pathinfo not in temp_ids:
-                    temp_ids.append(pathinfo)
-                else:
-                    raise AssertionException(
-                        "Duplicate path is found")
+            if multilist is not None:
+                for number, row in enumerate(multilist):
+                    pathinfo = row['path']
+                    if pathinfo not in temp_ids:
+                        temp_ids.append(pathinfo)
+                    else:
+                        raise AssertionException(
+                            "Duplicate path is found")
         return connectors_config
 
     def get_directory_connector_options(self, connector_name):
