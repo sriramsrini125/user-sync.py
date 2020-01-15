@@ -13,13 +13,10 @@ directory_users:
     multi:
       - type: ldap
         id: src1
-        path: connector-ldap.yml
+        path: connector-ldap3.yml
       - type: ldap
         id: src2
-        path: connector-ldap2.yml
-      - type: ldap
-        id: src3
-        path: connector-ldap3.yml
+        path: connector-ldap.yml
 
   groups:
     - directory_group: One
@@ -37,7 +34,7 @@ invocation_defaults:
   adobe_only_user_action: preserve
   adobe_only_user_list: null
   adobe_users: all
-  connector: null
+  connector: ldap
   process_groups: No
   strategy: sync
   test_mode: No

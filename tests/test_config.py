@@ -98,6 +98,41 @@ def test_directory_connnector_options(config_files, modify_root_config):
     print()
 
 
+
+def test_directory_connnector_options(config_files, modify_root_config):
+    """Load root config file and test for presence of root-level keys"""
+
+    d = [{
+        'id': 'test1',
+        'type': 'ldap',
+        'path': 'connector-ldap.yml'
+        },
+        {
+            'id': 'test2',
+            'type': 'ldap',
+            'path': 'connector-ldap.yml'
+        }
+    ]
+
+    modify_root_config(['directory_users', 'connectors', 'multi'], d)
+
+    config = ConfigFileLoader.load_root_config(config_files['root_config'])
+
+    assert ('multi' in config['directory_users']['connectors'])
+    assert('test1' in config['directory_users']['connectors']['multi'][0]['id'])
+    assert ('ldap' in config['directory_users']['connectors']['multi'][0]['type'])
+    assert ('connector-ldap.yml' in config['directory_users']['connectors']['multi'][0]['path'])
+    assert ('test2' in config['directory_users']['connectors']['multi'][1]['id'])
+    assert ('ldap' in config['directory_users']['connectors']['multi'][1]['type'])
+    assert ('connector-ldap.yml' in config['directory_users']['connectors']['multi'][1]['path'])
+    assert ('ldap' in config['directory_users']['connectors'])
+    assert ('connector-ldap.yml') in config['directory_users']['connectors']['ldap']
+    print()
+
+
+
+
+
 def test_max_adobe_percentage(cli_args, modify_root_config):
     root_config_file = modify_root_config(['limits', 'max_adobe_only_users'], "50%")
     config = ConfigFileLoader.load_root_config(root_config_file)
