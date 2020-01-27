@@ -101,6 +101,7 @@ class ConfigLoader(object):
 
         # get overrides from the main config
         invocation_config = self.main_config.get_dict_config('invocation_defaults', True)
+
         if invocation_config:
             for k, v in six.iteritems(self.invocation_defaults):
                 if isinstance(v, bool):
@@ -115,18 +116,19 @@ class ConfigLoader(object):
                     val = invocation_config.get_string(k, True)
                     if val:
                         options[k] = val
-
         # now handle overrides from CLI options
         for k, arg_val in self.args.items():
             if arg_val is None:
                 continue
             options[k] = arg_val
 
+
         # now process command line options.  the order of these is important,
         # because options processed later depend on the values of those processed earlier
 
         # --connector
         connector_spec = options['connector']
+        connector_new_type = connector_spec
         connector_type = user_sync.helper.normalize_string(connector_spec[0])
         if connector_type in ["ldap", "okta", "adobe_console", "multi"]:
             if len(connector_spec) > 1:
@@ -247,6 +249,7 @@ class ConfigLoader(object):
                     options['adobe_group_filter'].append(user_sync.rules.AdobeGroup.create(group))
             else:
                 raise AssertionException('Unknown option "%s" for adobe-users' % adobe_users_action)
+
         return options
 
     def get_logging_config(self):
@@ -303,43 +306,74 @@ class ConfigLoader(object):
         else:
             return None
 
-    def get_directory_connector_configs(self):
+    # def get_directory_connector_module_name(self, config):
+    #     """
+    #     :rtype str
+    #     """
+    #     if self.invocation_options.get('stray_list_input_path', None):
+    #         return None
+    #     # connector_type = self.invocation_options.get('directory_connector_type')
+    #     connector_type = config['type']
+    #     if connector_type:
+    #         print('user_sync.connector.driectory_ ' + connector_type)
+    #         return 'user_sync.connector.directory_' + connector_type
+    #     else:
+    #         return None
+
+    def get_directory_connector_configs(self, connectortype):
         connectors_config = None
+        listofconfig = []
         directory_config = self.main_config.get_dict_config('directory_users', True)
         if directory_config is not None:
             connectors_config = directory_config.get_dict_config('connectors', True)
         # make sure none of the standard connectors get reported as unused
-        if connectors_config:
-            connectors_config.get_list('ldap', True)
-            connectors_config.get_list('csv', True)
-            connectors_config.get_list('okta', True)
-            connectors_config.get_list('adobe_console', True)
-            multilist = connectors_config.get_list('multi', True)
-            temp_ids=[]
-            dup_dict = defaultdict(list)
-            if multilist is not None:
-                for number, row in enumerate(multilist):
-                    pathinfo = row['path']
-                    if pathinfo not in temp_ids:
-                        temp_ids.append(pathinfo)
-                    else:
-                        raise AssertionException(
-                            "Duplicate path is found")
-        return connectors_config
 
-    def get_directory_connector_options(self, connector_name):
+        if connectortype == ['multi']:
+            listofconfig = connectors_config.get_list('multi', True)
+            if listofconfig is None:
+                raise AssertionException("Config list cannot be none for Multi connector")
+            else:
+                self.validatestructure(listofconfig)
+                self.validateduplicates(listofconfig)
+        else:
+            path = connectors_config.get_list(connectortype[0], True)
+            config_dict = {'id': connectortype[0], 'type': connectortype[0], 'path': path[0]}
+            listofconfig.append(config_dict)
+
+        return listofconfig
+        # return connectors_config
+
+    def validatestructure(self, listofconfig):
+        for ids in listofconfig:
+            for keys in ids:
+                if keys not in ('id', 'path', 'type'):
+                    raise AssertionException('keys are not valid')
+
+    def validateduplicates(self, listofconfig):
+        temp_ids = []
+        for number, row in enumerate(listofconfig):
+            pathinfo = row['path']
+            if pathinfo not in temp_ids:
+                temp_ids.append(pathinfo)
+            else:
+                raise AssertionException(
+                        "Duplicate path is found")
+
+
+    def get_directory_connector_options(self, path):
         """
         :rtype dict
         """
         options = {}
-        connectors_config = self.get_directory_connector_configs()
-
-        if connector_name != 'csv' and connector_name not in connectors_config.value:
-            raise AssertionException("Config file must be specified for connector type :: '{}'".format(connector_name))
-
-        if connectors_config is not None:
-            connector_item = connectors_config.get_list(connector_name, True)
-            options = self.get_dict_from_sources(connector_item)
+        # connectors_config = self.get_directory_connector_configs()
+        #
+        # if connector_name != 'csv' and connector_name not in connectors_config.value:
+        #     raise AssertionException("Config file must be specified for connector type :: '{}'".format(connector_name))
+        #
+        # if connectors_config is not None:
+        #     connector_item = connectors_config.get_list(connector_name, True)
+        pathlist=[path]
+        options = self.get_dict_from_sources(pathlist)
         options = self.combine_dicts(
             [options, self.invocation_options.get('directory_connector_overridden_options', {})])
         return options
@@ -1119,3 +1153,4 @@ class OptionsBuilder(object):
             raise AssertionException("No config found.")
         self.options[key] = value = config.get_value(key, allowed_types)
         return value
+
