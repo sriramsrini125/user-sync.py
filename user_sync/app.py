@@ -37,7 +37,7 @@ import user_sync.lockfile
 import user_sync.rules
 import user_sync.cli
 import user_sync.resource
-from user_sync.DirectoryConnectorManager import DirectoryConnectorManager
+from user_sync.dcmanager import DirectoryConnectorManager
 from user_sync.error import AssertionException
 from user_sync.version import __version__ as app_version
 
@@ -318,30 +318,12 @@ def begin_work(config_loader):
     referenced_umapi_names.difference_update(six.iterkeys(secondary_umapi_configs))
     if len(referenced_umapi_names) > 0:
         raise AssertionException('Adobe groups reference unknown umapi connectors: %s' % referenced_umapi_names)
-    directory_connector_manager = DirectoryConnectorManager(config_loader)
 
-    # directory_connector = None
-    # directory_connector_options = None
-    # directory_connector_module_name = config_loader.get_directory_connector_module_name()
-    # if directory_connector_module_name is not None:
-    #     directory_connector_module = __import__(directory_connector_module_name, fromlist=[''])
-    #     directory_connector = user_sync.connector.directory.DirectoryConnector(directory_connector_module)
-    #     directory_connector_options = config_loader.get_directory_connector_options(directory_connector.name)
-    #
-    # config_loader.check_unused_config_keys()
-    #
-    # if directory_connector is not None and directory_connector_options is not None:
-    #     # specify the default user_identity_type if it's not already specified in the options
-    #     if 'user_identity_type' not in directory_connector_options:
-    #         directory_connector_options['user_identity_type'] = rule_config['new_account_type']
-    #     directory_connector.initialize(directory_connector_options)
-    #
-    # additional_group_filters = None
-    # additional_groups = rule_config.get('additional_groups', None)
-    # if additional_groups and isinstance(additional_groups, list):
-    #     additional_group_filters = [r['source'] for r in additional_groups]
-    # if directory_connector is not None:
-    #     directory_connector.state.additional_group_filters = additional_group_filters
+    additional_groups = rule_config.get('additional_groups', None)
+    default_account_type = rule_config['new_account_type']
+    directory_connector_manager = DirectoryConnectorManager(config_loader, additional_groups, default_account_type)
+
+    config_loader.check_unused_config_keys()
 
     primary_name = '.primary' if secondary_umapi_configs else ''
     umapi_primary_connector = user_sync.connector.umapi.UmapiConnector(primary_name, primary_umapi_config)

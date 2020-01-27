@@ -18,82 +18,45 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import user_sync.error
-import logging
-import os
-import sys
-import click
-import shutil
-from click_default_group import DefaultGroup
-from datetime import datetime
-from operator import itemgetter
-
-import six
-import yaml
-
+import user_sync.cli
 import user_sync.config
 import user_sync.connector.directory
 import user_sync.connector.umapi
+import user_sync.error
 import user_sync.helper
 import user_sync.lockfile
-import user_sync.rules
-import user_sync.cli
 import user_sync.resource
-from user_sync.error import AssertionException
-from user_sync.version import __version__ as app_version
-from user_sync.config import ConfigLoader
+import user_sync.rules
+
 
 class DirectoryConnectorManager(object):
-    def __init__(self, config_loader):
+    def __init__(self, config_loader, additional_groups, default_account_type):
         self.config_loader = config_loader
+        self.additional_groups = additional_groups
+        self.new_account_type = default_account_type
+        self.conn_cfg = config_loader.get_directory_connector_configs()
+        self.connectors = {c['id']: self.build_connector(c) for c in self.conn_cfg}
 
-        for parameter_name, parameter_value in six.iteritems(self.config_loader.get_invocation_options()):
-            if (parameter_name=='connector'):
-                connectortype=parameter_value
-                print('connector type is ', connectortype)
-        self.connectors = [self.build_connector(c) for c in self.get_connector_list(connectortype)]
-        #self.connectors = self.build_connector(self, config_loader)
-
-    def get_connector_list(self, connectortype):
-        connector_list = self.config_loader.get_directory_connector_configs(connectortype)
-        print ('connector list ', connector_list)
-        return connector_list
-
-
-
-    def get_connector_options(self, config):
-        directory_connector_options = self.config_loader.get_directory_connector_options(config['path'])
-        return directory_connector_options
-
-
-    def initialize(self, options=None):
-        """
-        :type options: dict
-        """
-        if options is None:
-            options = {}
-        self.state = self.implementation.connector_initialize(options)
-
+        print()
     def build_connector(self, config):
-        print('connector called')
-        rule_config = self.config_loader.get_rule_options()
-        directory_connector_module_name = 'user_sync.connector.directory_' + config['type']
+
+        directory_connector = None
+        directory_connector_options = None
+        directory_connector_module_name = self.config_loader.get_directory_connector_module_name(config['type'])
         if directory_connector_module_name is not None:
             directory_connector_module = __import__(directory_connector_module_name, fromlist=[''])
             directory_connector = user_sync.connector.directory.DirectoryConnector(directory_connector_module)
-            directory_connector_options = self.get_connector_options(config)
-            #self.config_loader.check_unused_config_keys()
+            directory_connector_options = self.config_loader.get_directory_connector_options(config['path'])
 
         if directory_connector is not None and directory_connector_options is not None:
             # specify the default user_identity_type if it's not already specified in the options
             if 'user_identity_type' not in directory_connector_options:
-                directory_connector_options['user_identity_type'] = rule_config['new_account_type']
+                directory_connector_options['user_identity_type'] = self.new_account_type
                 directory_connector.initialize(directory_connector_options)
 
-        additional_group_filters =   None
-        additional_groups = rule_config.get('additional_groups', None)
-        if additional_groups and isinstance(additional_groups, list):
-            additional_group_filters = [r['source'] for r in additional_groups]
+        additional_group_filters = None
+        if self.additional_groups and isinstance(self.additional_groups, list):
+            additional_group_filters = [r['source'] for r in self.additional_groups]
         if directory_connector is not None:
             directory_connector.state.additional_group_filters = additional_group_filters
 
@@ -105,6 +68,5 @@ class DirectoryConnectorManager(object):
         for c in self.connectors:
             print('final loop called')
             users.update(c.load_users_and_groups(groups, extended_attributes, all_users))
-            #users = self.load_users_and_groups_sub(groups, extended_attributes, all_users)
+            # users = self.load_users_and_groups_sub(groups, extended_attributes, all_users)
         return users
-
