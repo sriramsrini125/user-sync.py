@@ -17,27 +17,44 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import logging
 
-import user_sync.cli
-import user_sync.config
-import user_sync.connector.directory
-import user_sync.connector.umapi
-import user_sync.error
-import user_sync.helper
-import user_sync.lockfile
-import user_sync.resource
-import user_sync.rules
+import six
+
+from user_sync.config import DictConfig, OptionsBuilder
+from user_sync.connector.directory import DirectoryConnector
+from user_sync.error import AssertionException
 
 
 class DirectoryConnectorManager(object):
     def __init__(self, config_loader, additional_groups, default_account_type):
+        self.logger = logging.getLogger("dc manager")
         self.config_loader = config_loader
         self.additional_groups = additional_groups
         self.new_account_type = default_account_type
-        self.conn_cfg = config_loader.get_directory_connector_configs()
-        self.connectors = {c['id']: self.build_connector(c) for c in self.conn_cfg}
+        self.connectors = {}
 
-        print()
+        for k, v in six.iteritems(self.get_directory_connector_config()):
+            self.connectors[k] = self.build_connector(v)
+
+    def get_directory_connector_config(self):
+
+        config_dict = {}
+        for i in self.config_loader.get_directory_connector_configs():
+            caller = DictConfig("connectors", i)
+            builder = OptionsBuilder(caller)
+            builder.require_string_value('id')
+            builder.require_string_value('path')
+            builder.require_string_value('type')
+            caller.report_unused_values(self.logger)
+            options = builder.get_options()
+            conn_id = options['id']
+
+            if conn_id in config_dict:
+                raise AssertionException("Connector id: '{}' is already defined".format(conn_id))
+            config_dict[conn_id] = options
+        return config_dict
+
     def build_connector(self, config):
 
         directory_connector = None
@@ -45,7 +62,7 @@ class DirectoryConnectorManager(object):
         directory_connector_module_name = self.config_loader.get_directory_connector_module_name(config['type'])
         if directory_connector_module_name is not None:
             directory_connector_module = __import__(directory_connector_module_name, fromlist=[''])
-            directory_connector = user_sync.connector.directory.DirectoryConnector(directory_connector_module)
+            directory_connector = DirectoryConnector(directory_connector_module)
             directory_connector_options = self.config_loader.get_directory_connector_options(config['path'])
 
         if directory_connector is not None and directory_connector_options is not None:

@@ -326,17 +326,7 @@ class ConfigLoader(object):
         # If connector is not multi type, convert to equivalent dictionary
         if connector != 'multi':
             conn_options = [{'id': connector, 'type': connector, 'path': conn_options[0]}]
-
-        return [self.validate_directory_options(c) for c in conn_options]
-
-    def validate_directory_options(self, directory_config):
-        c = DictConfig("connectors", directory_config)
-        b = OptionsBuilder(c)
-        b.require_string_value('id')
-        b.require_string_value('path')
-        b.require_string_value('type')
-        c.report_unused_values(self.logger)
-        return b.get_options()
+        return conn_options
 
     def get_directory_connector_options(self, path):
         """
