@@ -80,10 +80,11 @@ class DirectoryConnectorManager(object):
         return directory_connector
 
     def load_users_and_groups(self, groups, extended_attributes, all_users):
-        # full process flow starts here
+
         users = {}
-        for c in self.connectors:
-            print('final loop called')
-            users.update(c.load_users_and_groups(groups, extended_attributes, all_users))
-            # users = self.load_users_and_groups_sub(groups, extended_attributes, all_users)
-        return users
+        for c,v in six.iteritems(self.connectors):
+            z = v.load_users_and_groups(groups, extended_attributes, all_users)
+
+            for k in z:
+                users[k['email']] = k
+        return six.itervalues(users)
