@@ -367,6 +367,7 @@ class RuleProcessor(object):
                                                                     extended_attributes=extended_attributes,
                                                                     all_users=directory_group_filter is None)
 
+        self.dropped_user_count = 0
         for directory_user in directory_users:
             user_key = self.get_directory_user_key(directory_user)
 
@@ -399,6 +400,12 @@ class RuleProcessor(object):
 
             # only if there actually is hook code: set up rest of hook scope, invoke hook, update user attributes
             if options['after_mapping_hook'] is not None:
+                def user_drop_callback():
+                    self.get_umapi_info(PRIMARY_UMAPI_NAME).get_desired_groups_by_user_key().pop(user_key)
+                    self.directory_user_by_user_key.pop(user_key)
+                    if user_key in filtered_directory_user_by_user_key:
+                        self.filtered_directory_user_by_user_key.pop(user_key)
+                    self.dropped_user_count += 1
                 self.after_mapping_hook_scope['source_attributes'] = directory_user['source_attributes'].copy()
                 target_attributes = dict()
                 target_attributes['email'] = directory_user.get('email')
@@ -409,17 +416,12 @@ class RuleProcessor(object):
                 target_attributes['country'] = directory_user.get('country')
                 self.after_mapping_hook_scope['target_attributes'] = target_attributes
                 # invoke the customer's hook code
-                self.after_mapping_hook_scope['drop'] = self.drop_user()
+                self.after_mapping_hook_scope['drop_user'] = user_drop_callback
                 self.log_after_mapping_hook_scope(before_call=True)
                 exec(options['after_mapping_hook'], self.after_mapping_hook_scope)
-                drop = self.after_mapping_hook_scope['drop']
                 self.log_after_mapping_hook_scope(after_call=True)
-                if type(drop) is bool and drop:
-                    self.get_umapi_info(PRIMARY_UMAPI_NAME).get_desired_groups_by_user_key().pop(user_key)
-                    self.directory_user_by_user_key.pop(user_key)
-                    if user_key in filtered_directory_user_by_user_key:
-                        self.filtered_directory_user_by_user_key.pop(user_key)
-                continue
+                if user_key not in self.directory_user_by_user_key:
+                    continue
                 # copy modified attributes back to the user object
                 directory_user.update(self.after_mapping_hook_scope['target_attributes'])
 
@@ -450,14 +452,12 @@ class RuleProcessor(object):
                     umapi_info.add_desired_group_for(user_key, rename_group)
 
         self.logger.debug('Total directory users after filtering: %d', len(filtered_directory_user_by_user_key))
+        if self.dropped_user_count > 0:
+            self.logger.info('{} users were dropped by extension config rules'.format(self.dropped_user_count))
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug('Group work list: %s', dict([(umapi_name, umapi_info.get_desired_groups_by_user_key())
                                                            for umapi_name, umapi_info
                                                            in six.iteritems(self.umapi_info_by_name)]))
-
-    @staticmethod
-    def drop_user():
-        return bool
 
     def is_directory_user_in_groups(self, directory_user, groups):
         """
